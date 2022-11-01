@@ -42,9 +42,9 @@ case $sys_bit in
 	;;
 *)
 	echo -e " 
-	haha...this ${red}spicy chicken script${none} your system is not supported。 ${yellow}(-_-) ${none}
+	哈哈……这个 ${red}辣鸡脚本${none} 不支持你的系统。 ${yellow}(-_-) ${none}
 
-	Note: only supports Ubuntu 16+ / Debian 8+ / CentOS 7+ system
+	备注: 仅支持 Ubuntu 16+ / Debian 8+ / CentOS 7+ 系统
 	" && exit 1
 	;;
 esac
@@ -767,6 +767,278 @@ install_caddy() {
 
 }
 caddy_config() {
+	# local email=$(shuf -i1-10000000000 -n1)
+	_load caddy-config.sh
+
+	# systemctl restart caddy
+	do_service restart caddy
+}
+
+install_v2ray() {
+	$cmd update -y
+	if [[ $cmd == "apt-get" ]]; then
+		$cmd install -y lrzsz git zip unzip curl wget qrencode libcap2-bin dbus
+	else
+		# $cmd install -y lrzsz git zip unzip curl wget qrencode libcap iptables-services
+		$cmd install -y lrzsz git zip unzip curl wget qrencode libcap
+	fi
+	ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+	[ -d /etc/v2ray ] && rm -rf /etc/v2ray
+	# date -s "$(curl -sI g.cn | grep Date | cut -d' ' -f3-6)Z"
+	_sys_timezone
+	_sys_time
+
+	if [[ $local_install ]]; then
+		if [[ ! -d $(pwd)/config ]]; then
+			echo
+			echo -e "$red Oops...the installation failed...$none"
+			echo
+			echo -e "Please make sure you have the complete V2Ray one-click installation script & management script uploaded from 233v2.com to the current ${green}$(pwd) $none directory"
+			echo
+			exit 1
+		fi
+		mkdir -p /etc/v2ray/233boy/v2ray
+		cp -rf $(pwd)/* /etc/v2ray/233boy/v2ray
+	else
+		pushd /tmp
+		git clone https://github.com/233boy/v2ray -b "$_gitbranch" /etc/v2ray/233boy/v2ray --depth=1
+		popd
+
+	fi
+
+	if [[ ! -d /etc/v2ray/233boy/v2ray ]]; then
+		echo
+		echo -e "$red 哎Yay...cloning the script repository went wrong...$none"
+		echo
+		echo -e "Reminder.....Please try to install Git yourself: ${green}$cmd install -y git $none and then install this script"
+		echo
+		exit 1
+	fi
+
+	# download v2ray file then install
+	_load download-v2ray.sh
+	_download_v2ray_file
+	_install_v2ray_service
+	_mkdir_dir
+}
+
+config() {
+	cp -f /etc/v2ray/233boy/v2ray/config/backup.conf $backup
+	cp -f /etc/v2ray/233boy/v2ray/v2ray.sh $_v2ray_sh
+	chmod +x $_v2ray_sh
+
+	v2ray_id=$uuid
+	alterId=0
+	ban_bt=true
+	if [[ $v2ray_transport -ge 18 && $v2ray_transport -ne 33 ]]; then
+		v2ray_dynamicPort_start=${v2ray_dynamic_port_start_input}
+		v2ray_dynamicPort_end=${v2ray_dynamic_port_end_input}
+	fi
+	_load config.sh
+
+	# if [[ $cmd == "apt-get" ]]; then
+	# 	cat >/etc/network/if-pre-up.d/iptables <<-EOF
+	# 		#!/bin/sh
+	# 		/sbin/iptables-restore < /etc/iptables.rules.v4
+	# 		/sbin/ip6tables-restore < /etc/iptables.rules.v6
+	# 	EOF
+	# 	chmod +x /etc/network/if-pre-up.d/iptables
+	# 	# else
+	# 	# 	[ $(pgrep "firewall") ] && systemctl stop firewalld
+	# 	# 	systemctl mask firewalld
+	# 	# 	systemctl disable firewalld
+	# 	# 	systemctl enable iptables
+	# 	# 	systemctl enable ip6tables
+	# 	# 	systemctl start iptables
+	# 	# 	systemctl start ip6tables
+	# fi
+
+	# systemctl restart v2ray
+	do_service restart v2ray
+	backup_config
+
+}
+
+backup_config() {
+	sed -i "18s/=1/=$v2ray_transport/; 21s/=2333/=$v2ray_port/; 24s/=$old_id/=$uuid/" $backup
+	if [[ $v2ray_transport -ge 18 && $v2ray_transport -ne 33 ]]; then
+		sed -i "30s/=10000/=$v2ray_dynamic_port_start_input/; 33s/=20000/=$v2ray_dynamic_port_end_input/" $backup
+	fi
+	if [[ $shadowsocks ]]; then
+		sed -i "42s/=/=true/; 45s/=6666/=$ssport/; 48s/=233blog.com/=$sspass/; 51s/=chacha20-ietf/=$ssciphers/" $backup
+	fi
+	[[ $v2ray_transport == [45] || $v2ray_transport == 33 ]] && sed -i "36s/=233blog.com/=$domain/" $backup
+	[[ $caddy ]] && sed -i "39s/=/=true/" $backup
+	[[ $ban_ad ]] && sed -i "54s/=/=true/" $backup
+	if [[ $is_path ]]; then
+		sed -i "57s/=/=true/; 60s/=233blog/=$path/" $backup
+		sed -i "63s#=https://liyafly.com#=$proxy_site#" $backup
+	fi
+}
+
+get_ip() {
+	ip=$(curl -s https://ipinfo.io/ip)
+	[[ -z $ip ]] && ip=$(curl -s https://api.ip.sb/ip)
+	[[ -z $ip ]] && ip=$(curl -s https://api.ipify.org)
+	[[ -z $ip ]] && ip=$(curl -s https://ip.seeip.org)
+	[[ -z $ip ]] && ip=$(curl -s https://ifconfig.co/ip)
+	[[ -z $ip ]] && ip=$(curl -s https://api.myip.com | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}")
+	[[ -z $ip ]] && ip=$(curl -s icanhazip.com)
+	[[ -z $ip ]] && ip=$(curl -s myip.ipip.net | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}")
+	[[ -z $ip ]] && echo -e "\n$red 这垃圾小鸡扔了吧！$none\n" && exit
+}
+
+error() {
+
+	echo -e "\n$red typo! $none\n"
+
+}
+
+pause() {
+
+	read -rsp "$(echo -e "Please $green Enter to $none Continue....or press $red Ctrl + C $none to Cancel.")" -d $'\n'
+	echo
+}
+do_service() {
+	if [[ $systemd ]]; then
+		systemctl $1 $2
+	else
+		service $2 $1
+	fi
+}
+show_config_info() {
+	clear
+	_load v2ray-info.sh
+	_v2_args
+	_v2_info
+	_load ss-info.sh
+
+}
+
+install() {
+	if [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f $backup && -d /etc/v2ray/233boy/v2ray ]]; then
+		echo
+		echo "Big guy...you already installed V2Ray...no need to reinstall"
+		echo
+		echo -e " $yellow输入 ${cyan}v2ray${none} $yellow即可管理 V2Ray${none}"
+		echo
+		exit 1
+	elif [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f /etc/v2ray/233blog_v2ray_backup.txt && -d /etc/v2ray/233boy/v2ray ]]; then
+		echo
+		echo "If you need to continue the installation.. please uninstall the old version first"
+		echo
+		echo -e " $yellow enter ${cyan}v2ray uninstall${none} $yellow can uninstall ${none}"
+		echo
+		exit 1
+	fi
+	v2ray_config
+	blocked_hosts
+	shadowsocks_config
+	install_info
+	# [[ $caddy ]] && domain_check
+	install_v2ray
+	if [[ $caddy || $v2ray_port == "80" ]]; then
+		if [[ $cmd == "yum" ]]; then
+			[[ $(pgrep "httpd") ]] && systemctl stop httpd
+			[[ $(command -v httpd) ]] && yum remove httpd -y
+		else
+			[[ $(pgrep "apache2") ]] && service apache2 stop
+			[[ $(command -v apache2) ]] && apt-get remove apache2* -y
+		fi
+	fi
+	[[ $caddy ]] && install_caddy
+
+	## bbr
+	# _load bbr.sh
+	# _try_enable_bbr
+
+	get_ip
+	config
+	show_config_info
+}
+uninstall() {
+
+	if [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f $backup && -d /etc/v2ray/233boy/v2ray ]]; then
+		. $backup
+		if [[ $mark ]]; then
+			_load uninstall.sh
+		else
+			echo
+			echo -e " $yellow enter ${cyan}v2ray uninstall${none} $yellow can uninstall ${none}"
+			echo
+		fi
+
+	elif [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f /etc/v2ray/233blog_v2ray_backup.txt && -d /etc/v2ray/233boy/v2ray ]]; then
+		echo
+		echo -e " $yellow enter ${cyan}v2ray uninstall${none} $yellow can uninstall ${none}"
+		echo
+	else
+		echo -e "
+		$red Big boobs... You seem to have installed V2Ray.... Uninstall a dick...$none
+
+		Remarks...Only supports uninstalling and using the V2Ray one-click installation script provided by me (233v2.com)
+		" && exit 1
+	fi
+
+}
+
+args=$1
+_gitbranch=$2
+[ -z $1 ] && args="online"
+case $args in
+online)
+	#hello world
+	[[ -z $_gitbranch ]] && _gitbranch="master"
+	;;
+local)
+	local_install=true
+	;;
+*)
+	echo
+	echo -e "The parameter you entered <$red $args $none>...what the hell is this...the script doesn't recognize it"
+	echo
+	echo -e "This spicy chicken script only supports input $green local / online $none parameter"
+	echo
+	echo -e "Enter $yellow local $none to use local installation"
+	echo
+	echo -e "Type $yellow online $none to use online installation (default)"
+	echo
+	exit 1
+	;;
+esac
+
+clear
+while :; do
+	echo
+	echo "........... V2Ray 一Key Install Scripts & Admin Scripts by 233v2.com .........."
+	echo
+	echo "Help description: https://233v2.com/post/1/"
+	echo
+	echo "Building Tutorial: https://233v2.com/post/2/"
+	echo
+	echo " 1. Install"
+	echo
+	echo " 2. uninstall"
+	echo
+	if [[ $local_install ]]; then
+		echo -e "$yellow Friendly reminder.. Local installation is enabled ..$none"
+		echo
+	fi
+	read -p "$(echo -e "please choose [${magenta}1-2$none]:")" choose
+	case $choose in
+	1)
+		install
+		break
+		;;
+	2)
+		uninstall
+		break
+		;;
+	*)
+		error
+		;;
+	esac
+done() {
 	# local email=$(shuf -i1-10000000000 -n1)
 	_load caddy-config.sh
 
